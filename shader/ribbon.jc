@@ -1,0 +1,266 @@
+/*|| https://wake.tools ||                                                            || GLSL | Wake Alpha ||
+  | --------------------------------------------------------------------------------------------------+-+++|>
+  +-  Ribbon                                                                                  || @ Maeiky  ||
+  |---------------------------------------------------------------------------------------------------+-+++|>
+  +-  Create a 3d ribbon with a lot of simple quad
+  |
+  |  This example use Sokol, refer to:
+  |  https://github.com/floooh/sokol
+  |-----|--------|---------------------|-----------------------------|--------------------------------+-+++|>
+*/
+#include "shader_draw.h"
+#include "imgui_draw.h"
+
+#define HANDMADE_MATH_IMPLEMENTATION
+#define HANDMADE_MATH_NO_SSE
+#include "HandmadeMath.h"
+
+#include "shader/ribbon.glsl.h"
+
+#define PARTICLES_PER_INST  1000
+#define NB_INST  4
+
+static vec3 inst_pos[NB_INST]={};
+static int inst_size = 0;
+
+
+///--------------------------------------------------------------------------------------------
+///--------------------------------------------------------------------------------------------
+///==|PIELINE|==
+///============================================================================================
+///--------------------------------------------------------------------------------------------
+static struct {
+   sg_pass_action pass_engin;
+   sg_pipeline pip;
+   sg_bindings bind;
+   bool valid;
+   float rx, ry;
+} engin_state;
+
+static void use_shader(jit_t* _j, drawlist_t* _drawlist){
+   vs_params_t vs_params;
+    /// CAM ///
+   const float w = _j->shp.iResolution.x;
+   const float h = _j->shp.iResolution.y;
+   const float t = _j->shp.iTime;
+   hmm_mat4 proj = HMM_Perspective(60.0f, w/h, 0.01f, 10.0f);
+   hmm_mat4 view = HMM_LookAt(HMM_Vec3(0.0f, 1.5f, 6.0f), HMM_Vec3(0.0f, 0.0f, 0.0f), HMM_Vec3(0.0f, 1.0f, 0.0f));
+   hmm_mat4 view_proj = HMM_MultiplyMat4(proj, view);
+   //engin_state.rx += 0.001f * t; 
+   //engin_state.ry += 0.0005f * t;
+   hmm_mat4 rxm = HMM_Rotate(engin_state.rx, HMM_Vec3(1.0f, 0.0f, 0.0f));
+   hmm_mat4 rym = HMM_Rotate(engin_state.ry, HMM_Vec3(0.0f, 1.0f, 0.0f));
+   hmm_mat4 model = HMM_MultiplyMat4(rxm, rym);
+   vs_params.mvp = HMM_MultiplyMat4(view_proj, model);
+   /// /// ///
+   igText("dim : %f, %f, %f", _j->shp.iResolution.x, _j->shp.iResolution.y, _j->shp.iResolution.z);
+   igText("iTime : %.2f", _j->shp.iTime);
+   igText("iTimeDelta : %.4f", _j->shp.iTimeDelta);
+   igText("iMouse: %f, %f ", _j->shp.iMouse.x,  _j->shp.iMouse.y);
+   
+  
+   if(_j->state==JIT_INI){
+      sg_shader sh = get_module_shader(S("ribbon"),S("ribbon"));
+      sg_buffer_desc _buff_desc = (sg_buffer_desc){
+         .size = 4096*10000, //TODO max size
+         .usage = SG_USAGE_STREAM,
+         .label = "quad-vertices",
+      };
+      engin_state.bind.vertex_buffers[0] = sg_make_buffer(&_buff_desc);
+
+      sg_buffer_desc _idx_buff_desc=(sg_buffer_desc){
+         .size = 4096*2000, //TODO max size
+         .type = SG_BUFFERTYPE_INDEXBUFFER,
+         .usage = SG_USAGE_STREAM,
+         .label = "quad-indices"
+      };
+      engin_state.bind.index_buffer = sg_make_buffer(&_idx_buff_desc);
+      
+      engin_state.bind.vertex_buffers[1] = sg_make_buffer(&(sg_buffer_desc){
+        .size = (NB_INST*PARTICLES_PER_INST) * sizeof(vec3),
+        .usage = SG_USAGE_STREAM,
+        .label = "instancedata"
+      });
+
+      // a pipeline object
+      sg_pipeline_desc _pip_desc = (sg_pipeline_desc){
+         .layout = {
+        
+            // vertex buffer at slot 1 must step per instance
+            .buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE,
+            .buffers[1].step_rate = PARTICLES_PER_INST,
+            //.buffers[1].stride = 4,
+            .attrs = {
+                [ATTR_vs_position] = { .format=SG_VERTEXFORMAT_FLOAT4, .buffer_index=0 },
+                [ATTR_vs_lookat]   = { .format=SG_VERTEXFORMAT_FLOAT4, .buffer_index=0 },
+                [ATTR_vs_lookatV]  = { .format=SG_VERTEXFORMAT_FLOAT4, .buffer_index=0 },
+                [ATTR_vs_depth]    = { .format=SG_VERTEXFORMAT_FLOAT2, .buffer_index=0 },
+                [ATTR_vs_id]       = { .format=SG_VERTEXFORMAT_UBYTE4, .buffer_index=0 },
+                [ATTR_vs_inst_pos] = { .format=SG_VERTEXFORMAT_FLOAT3, .buffer_index=1 }
+            },
+         },
+         .colors[0]={
+           .write_mask = SG_COLORMASK_RGBA,
+           .blend = {
+               .enabled = true,
+               .src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA,
+               .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+               .src_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_DST_ALPHA,
+               .dst_factor_alpha = SG_BLENDFACTOR_ONE,
+            },
+         },
+         .shader = sh,
+         .index_type = SG_INDEXTYPE_UINT16,
+         //.cull_mode = SG_CULLMODE_BACK,
+         //.cull_mode = SG_CULLMODE_FRONT,
+         .depth = {
+            /// == Depth test == ////
+            .compare = SG_COMPAREFUNC_LESS_EQUAL,
+            .write_enabled = true,
+         },
+         .label = "instancing-pipeline"
+      };
+
+      info_print("use shader_id: %d",sh.id); 
+      engin_state.pip = sg_make_pipeline(&_pip_desc);
+
+      // default pass action 
+      engin_state.pass_engin = (sg_pass_action) {};
+      engin_state.pass_engin.colors[0] = (sg_color_attachment_action){ 
+         .load_action=SG_LOADACTION_LOAD
+      };
+      engin_state.valid=true;
+   }
+  
+   //igText("shader_id: %x",sh.id); 
+   
+   static int count = 0;count++;
+   igText("count: %d",count); 
+   igText("vertex_buffers: %d",engin_state.bind.vertex_buffers[0]); 
+     
+   if(engin_state.valid){
+  
+      if(_j->state==JIT_INI){ //TODO only on init?
+         uint32_t  vb_offset = sg_append_buffer(engin_state.bind.vertex_buffers[0],  &(sg_range){_drawlist->vertex, 	(_drawlist->v) * sizeof(vtx_t)});
+         uint32_t  ib_offset = sg_append_buffer(engin_state.bind.index_buffer, 		&(sg_range){_drawlist->tx, 		(_drawlist->t) * sizeof(tx_t)});
+
+      }
+        // update instance data
+       sg_update_buffer(engin_state.bind.vertex_buffers[1], &(sg_range){
+           .ptr = inst_pos,
+           .size = (size_t)inst_size * sizeof(vec3)
+       });
+
+      sg_begin_default_pass(&engin_state.pass_engin, _j->shp.iResolution.x, _j->shp.iResolution.y);
+      sg_apply_pipeline(engin_state.pip);
+      sg_apply_bindings(&engin_state.bind);
+
+      DefaultVsParam(vs_params, _j->shp);
+      vs_params.iNbInst= NB_INST;
+      vs_params.iNbPerInst= PARTICLES_PER_INST;
+      sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &(sg_range){&vs_params, sizeof(vs_params)});
+
+      sg_draw(0, _drawlist->t* sizeof(tx_t)/ sizeof(uint16_t), NB_INST*PARTICLES_PER_INST);
+
+      igText("vtx count : %d",_drawlist->v); 
+      igText("tri count : %d",PARTICLES_PER_INST*NB_INST*2); 
+   
+      sg_end_pass();
+      sg_commit();
+   }
+}
+
+////////////////////
+///== DRAWLIST ==///
+static vtx_t gbl_vertex[400000];
+static tx_t  gbl_tx[400000];
+static vec3  gbl_line[400000];//make it smaller
+static drawlist_t gbl_drawlist = (drawlist_t)
+{
+   .vertex=gbl_vertex,
+   .tx=gbl_tx,
+   .line=gbl_line,
+};
+static drawlist_t* drawlist =&gbl_drawlist;
+
+
+
+typedef struct bark_t{
+   vec3 pt[4];
+}bark_t;
+ARRAY_grow(Trunc, bark_t, 25);
+
+
+static bark_t new_bark(int _zx, int _zy){
+ return (bark_t){.pt = {
+      [0]=(vec3){.x=-_zx, .y=0},
+      [1]=(vec3){.x=_zx, .y=0},
+      [2]=(vec3){.x=-_zx, .y= _zy*2},
+      [3]=(vec3){.x= _zx, .y= _zy*2},
+   }};
+}
+
+static void bark_rot(bark_t* _b, quaternion _q){
+   _b->pt[0] = rotate(_b->pt[0],_q);
+   _b->pt[1] = rotate(_b->pt[1],_q);
+   _b->pt[2] = rotate(_b->pt[2],_q);
+   _b->pt[3] = rotate(_b->pt[3],_q);
+}
+
+static void bark_translate(bark_t* _b, vec3 _t){
+   _b->pt[0] = add(_b->pt[0],_t);
+   _b->pt[1] = add(_b->pt[1],_t);
+   _b->pt[2] = add(_b->pt[2],_t);
+   _b->pt[3] = add(_b->pt[3],_t);
+}
+
+
+///--------------------------------------------------------------------------------------------
+///--------------------------------------------------------------------------------------------
+///==|MAIN|==
+///============================================================================================
+///--------------------------------------------------------------------------------------------
+static jit_t* jit;
+int JIT_MAIN(jit_t* _j){
+   jit = _j;
+   zxHRes = (jit->shp.iResolution.x*4)/2;
+   
+   std_array_t module_mem = _init_mem(10);
+   Trunc trunk={};
+   Trunc_ini(&trunk, &module_mem);
+   
+    if(_j->state==JIT_INI)
+    {
+      drawlist_reset(drawlist);
+
+      static num rot = 0;
+      rot+=0.01;
+
+      for(int i=0; i<1; i++){
+         bark_t* b = Trunc_add(&trunk,  new_bark(2,120));
+      }
+
+      for(int i=0; i<trunk.size; i++){
+         bark_t* b = &trunk.data[i];
+         draw_quad_m2(drawlist, b->pt[0],  b->pt[1], 
+                               b->pt[2],  b->pt[3], 1 );
+      }
+   }
+
+    if(_j->state==JIT_INI){ //TODO only on init?
+
+      for(int i=0;i<NB_INST;i++){
+         inst_pos[i].x = i*400-50;
+
+        // inst_pos[i].y = i;
+         inst_pos[i].z = 0;
+         
+         if(inst_size>=NB_INST){break;}
+         inst_size++;  
+      }
+   }
+   
+   use_shader(_j,drawlist);
+   _close_mem(&module_mem);
+   return 0;
+ }

@@ -1,0 +1,419 @@
+/*|| https://wake.tools ||                                                         || JIT C99 | Wake Alpha ||
+  | --------------------------------------------------------------------------------------------------+-+++|>
+  +-  Image Load                                                                               || @ Maeiky ||
+  |---------------------------------------------------------------------------------------------------+-+++|>
+  +-  This is an example of 2d physique with some basic imgui drawing. This is a part of Chimpmunk demo:
+  |   https://github.com/slembcke/Chipmunk2D/blob/master/demo/Unicycle.c
+  |
+  |-----|--------|---------------------|-----------------------------|--------------------------------+-+++|>
+*/
+#include "jit.h"
+#include "imgui_draw.h"
+#include "shader_draw.h"
+
+#include "chipmunk/chipmunk.h"
+
+static cpBody *balance_body;
+static cpFloat balance_sin = 0.0;
+
+static cpBody *wheel_body;
+static cpConstraint *motor;
+
+
+static float dbg_x = 0;
+static float dbg_y = 0;
+
+DrawCtx gctx;
+
+static void create_canvas(){
+   ImGuiIO* io = igGetIO();
+   ImDrawList* draw_list = igGetWindowDrawList();
+   static bool opt_enable_grid = true;
+   static bool opt_enable_context_menu = true;
+   static bool adding_line = false;
+            
+   static float zoom=1.0;
+   igSliderFloat("Zoom", &zoom,  0.5f, 8.0f, "%.02f",0);
+
+   ImVec2 canvas_p0;igGetCursorScreenPos(&canvas_p0);      // ImDrawList API uses screen coordinates!
+   ImVec2 canvas_sz;igGetContentRegionAvail(&canvas_sz);   // Resize canvas to what's available
+   if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
+   if (canvas_sz.y < 50.0f) canvas_sz.y = 50.0f;
+   ImVec2 canvas_p1 = (ImVec2){canvas_p0.x + canvas_sz.x, canvas_p0.y + canvas_sz.y};
+
+
+   igInvisibleButton("canvas", canvas_sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+   const bool is_hovered = igIsItemHovered(0); // Hovered
+   const bool is_active = igIsItemActive();   // Held
+
+   static ImVec2 camera = (ImVec2){0,0};
+   static bool one=false;
+   if(!one){one=true;
+      camera.x=canvas_sz.x-canvas_sz.x/2;
+      camera.y=canvas_sz.y-canvas_sz.y/2;
+   }
+
+   const float mouse_threshold_for_pan = opt_enable_context_menu ? -1.0f : 0.0f;
+   if (is_active && igIsMouseDragging(ImGuiMouseButton_Right, mouse_threshold_for_pan))
+   {
+      camera.x += io->MouseDelta.x;
+      camera.y += io->MouseDelta.y;
+   }
+   
+   const ImVec2 origin= (ImVec2){canvas_p0.x + camera.x, canvas_p0.y + camera.y}; // Lock scrolled origin
+   const ImVec2 mouse_pos_in_canvas = (ImVec2){ io->MousePos.x - origin.x, io->MousePos.y - origin.y};
+   
+   static Point mouse = {}; 
+   mouse = (Point){.x=mouse_pos_in_canvas.x,.y=mouse_pos_in_canvas.y};
+
+    gctx = (DrawCtx){.ctx=draw_list,
+                        .origin=origin,
+                        .zoom=zoom,
+                        .camera=camera,
+                        .hsize=(Point){.x=canvas_sz.x/2,.y=canvas_sz.y/2},
+                        .mouse=mouse,
+      };
+  
+      
+   //Context menu (under default mouse threshold)
+   ImVec2 drag_delta;igGetMouseDragDelta(&drag_delta, ImGuiMouseButton_Right, -1.0f);
+   if (opt_enable_context_menu && drag_delta.x == 0.0f && drag_delta.y == 0.0f)
+       igOpenPopupOnItemClick("context", ImGuiPopupFlags_MouseButtonRight);
+   if (igBeginPopup("context",0))
+   {
+      int idxp=0;
+       if (igMenuItem_Bool("Remove one", NULL, false, idxp )) {  }
+       if (igMenuItem_Bool("Remove all", NULL, false, idxp )) {  }
+       igEndPopup();
+   }
+
+   float th = 1.0;
+   //Draw grid + all lines in the canvas
+   ImDrawList_PushClipRect(draw_list, canvas_p0, canvas_p1, true);
+   if (opt_enable_grid)
+   {
+       const float GRID_STEP = 64.0f*zoom;
+       for (float x = fmodf(camera.x, GRID_STEP); x < canvas_sz.x; x += GRID_STEP)
+            ImDrawList_AddLine(draw_list,
+            (ImVec2){(canvas_p0.x + x)*1, (canvas_p0.y)*1},
+            (ImVec2){(canvas_p0.x + x)*1, (canvas_p1.y)*1}, IM_COL32(200, 200, 200, 40),th);
+
+       for (float y = fmodf(camera.y, GRID_STEP); y < canvas_sz.y; y += GRID_STEP)
+            ImDrawList_AddLine(draw_list,
+            (ImVec2){(canvas_p0.x)*1, (canvas_p0.y + y)*1},
+            (ImVec2){(canvas_p1.x)*1, (canvas_p0.y + y)*1}, IM_COL32(200, 200, 200, 40),th);
+   }
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// ==|CHIP DRAW|==
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+inl cpSpaceDebugColor RGBAColor(float r, float g, float b, float a){
+	cpSpaceDebugColor color = {r, g, b, a};
+	return color;
+}
+
+inl cpSpaceDebugColor LAColor(float l, float a){
+	cpSpaceDebugColor color = {l, l, l, a};
+	return color;
+}
+
+static void ChipmunkDebugDrawDot(cpFloat size, cpVect pos, cpSpaceDebugColor fillColor)
+{
+/*
+	float r = (float)(size*0.5f*ChipmunkDebugDrawPointLineScale);
+	RGBA8 fill = cp_to_rgba(fillColor);
+	Vertex *vertexes = push_vertexes(4, (Index[]){0, 1, 2, 0, 2, 3}, 6);
+	vertexes[0] = (Vertex){{(float)pos.x, (float)pos.y}, {-1, -1}, r, fill, fill};
+	vertexes[1] = (Vertex){{(float)pos.x, (float)pos.y}, {-1,  1}, r, fill, fill};
+	vertexes[2] = (Vertex){{(float)pos.x, (float)pos.y}, { 1,  1}, r, fill, fill};
+	vertexes[3] = (Vertex){{(float)pos.x, (float)pos.y}, { 1, -1}, r, fill, fill};
+   */
+}
+
+static void ChipmunkDebugDrawCircle(cpVect pos, cpFloat angle, cpFloat radius, cpSpaceDebugColor outlineColor, cpSpaceDebugColor fillColor)
+{
+//drawCircle(DrawCtx*_, vec3 _pt, num _size, char* _name, ImU32 _col, num _th) {
+drawCircle(&gctx, (vec3){pos.x,pos.y} , radius,"circle", IM_COL32(255,50,50,200), 3);
+
+  vec3 border = posS((vec3){pos.x,pos.y}, angle*-1, radius);
+  drawLine(&gctx, (vec3){pos.x,pos.y}, border);
+}
+static void ChipmunkDebugDrawFatSegment(cpVect a, cpVect b, cpFloat radius, cpSpaceDebugColor outlineColor, cpSpaceDebugColor fillColor)
+{
+  drawLine(&gctx, (vec3){a.x,a.y}, (vec3){b.x,b.y});
+}
+
+static void ChipmunkDebugDrawSegment(cpVect a, cpVect b, cpSpaceDebugColor color)
+{
+	ChipmunkDebugDrawFatSegment(a, b, 0.0f, color, color);
+}
+
+#define MAX_POLY_VERTEXES 64
+// Fill needs (count - 2) triangles.
+// Outline needs 4*count triangles.
+#define MAX_POLY_INDEXES (3*(5*MAX_POLY_VERTEXES - 2))
+
+static void ChipmunkDebugDrawPolygon(int count, const cpVect *verts, cpFloat radius, cpSpaceDebugColor outlineColor, cpSpaceDebugColor fillColor)
+{
+	//Vertex *vertexes = push_vertexes(4*count, indexes, 3*(5*count - 2));
+	for(int i=0; i<count; i++){
+		cpVect v0 = verts[i];
+		cpVect a = verts[(i+(count - 1))%count];
+		cpVect b = verts[(i+(count + 1))%count];
+		
+     drawLine(&gctx, (vec3){v0.x,v0.y}, (vec3){b.x,b.y});
+	}
+}
+
+
+static void ChipmunkDebugDrawBB(cpBB bb, cpSpaceDebugColor color)
+{
+	cpVect verts[4] = {
+		cpv(bb.r, bb.b),
+		cpv(bb.r, bb.t),
+		cpv(bb.l, bb.t),
+		cpv(bb.l, bb.b),
+	};
+	ChipmunkDebugDrawPolygon(4, verts, 0.0f, color, LAColor(0, 0));
+}
+
+static void
+DrawCircle(cpVect p, cpFloat a, cpFloat r, cpSpaceDebugColor outline, cpSpaceDebugColor fill, cpDataPointer data)
+{ChipmunkDebugDrawCircle(p, a, r, outline, fill);}
+
+static void
+DrawSegment(cpVect a, cpVect b, cpSpaceDebugColor color, cpDataPointer data)
+{ChipmunkDebugDrawSegment(a, b, color);}
+
+static void
+DrawFatSegment(cpVect a, cpVect b, cpFloat r, cpSpaceDebugColor outline, cpSpaceDebugColor fill, cpDataPointer data)
+{ChipmunkDebugDrawFatSegment(a, b, r, outline, fill);}
+
+static void
+DrawPolygon(int count, const cpVect *verts, cpFloat r, cpSpaceDebugColor outline, cpSpaceDebugColor fill, cpDataPointer data)
+{ChipmunkDebugDrawPolygon(count, verts, r, outline, fill);}
+
+static void
+DrawDot(cpFloat size, cpVect pos, cpSpaceDebugColor color, cpDataPointer data)
+{ChipmunkDebugDrawDot(size, pos, color);}
+
+
+static cpSpaceDebugColor Colors[] = {
+	{0xb5/255.0f, 0x89/255.0f, 0x00/255.0f, 1.0f},
+	{0xcb/255.0f, 0x4b/255.0f, 0x16/255.0f, 1.0f},
+	{0xdc/255.0f, 0x32/255.0f, 0x2f/255.0f, 1.0f},
+	{0xd3/255.0f, 0x36/255.0f, 0x82/255.0f, 1.0f},
+	{0x6c/255.0f, 0x71/255.0f, 0xc4/255.0f, 1.0f},
+	{0x26/255.0f, 0x8b/255.0f, 0xd2/255.0f, 1.0f},
+	{0x2a/255.0f, 0xa1/255.0f, 0x98/255.0f, 1.0f},
+	{0x85/255.0f, 0x99/255.0f, 0x00/255.0f, 1.0f},
+};
+
+#include "chipmunk/chipmunk_structs.h"
+static cpSpaceDebugColor
+ColorForShape(cpShape *shape, cpDataPointer data)
+{
+	if(cpShapeGetSensor(shape)){
+		return LAColor(1.0f, 0.1f);
+	} else {
+		cpBody *body = cpShapeGetBody(shape);
+		
+		if(cpBodyIsSleeping(body)){
+			return RGBAColor(0x58/255.0f, 0x6e/255.0f, 0x75/255.0f, 1.0f);
+		} else if(body->sleeping.idleTime > shape->space->sleepTimeThreshold) {
+			return RGBAColor(0x93/255.0f, 0xa1/255.0f, 0xa1/255.0f, 1.0f);
+		} else {
+			uint32_t val = (uint32_t)shape->hashid;
+			
+			// scramble the bits up using Robert Jenkins' 32 bit integer hash function
+			val = (val+0x7ed55d16) + (val<<12);
+			val = (val^0xc761c23c) ^ (val>>19);
+			val = (val+0x165667b1) + (val<<5);
+			val = (val+0xd3a2646c) ^ (val<<9);
+			val = (val+0xfd7046c5) + (val<<3);
+			val = (val^0xb55a4f09) ^ (val>>16);
+			return Colors[val & 0x7];
+		}
+	}
+}
+
+static void
+ChipmunkDemoDefaultDrawImpl(cpSpace *space)
+{
+	cpSpaceDebugDrawOptions drawOptions = {
+		DrawCircle,
+		DrawSegment,
+		DrawFatSegment,
+		DrawPolygon,
+		DrawDot,
+		
+		(cpSpaceDebugDrawFlags)(CP_SPACE_DEBUG_DRAW_SHAPES | CP_SPACE_DEBUG_DRAW_CONSTRAINTS | CP_SPACE_DEBUG_DRAW_COLLISION_POINTS),
+		
+		{0xEE/255.0f, 0xE8/255.0f, 0xD5/255.0f, 1.0f}, // Outline color
+		ColorForShape,
+		{0.0f, 0.75f, 0.0f, 1.0f}, // Constraint color
+		{1.0f, 0.0f, 0.0f, 1.0f}, // Collision point color
+		NULL,
+	};
+	
+	cpSpaceDebugDraw(space, &drawOptions);
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// ==|WORLD|==
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#define GRABBABLE_MASK_BIT (1<<31)
+cpShapeFilter GRAB_FILTER = {CP_NO_GROUP, GRABBABLE_MASK_BIT, GRABBABLE_MASK_BIT};
+cpShapeFilter NOT_GRABBABLE_FILTER = {CP_NO_GROUP, ~GRABBABLE_MASK_BIT, ~GRABBABLE_MASK_BIT};
+static inline cpFloat
+bias_coef(cpFloat errorBias, cpFloat dt)
+{
+	return 1.0f - cpfpow(errorBias, dt);
+}
+
+static void motor_preSolve(cpConstraint *motor, cpSpace *space)
+{
+	cpFloat dt = cpSpaceGetCurrentTimeStep(space);
+
+//	dbg_x = gctx.mouse.x;
+///	dbg_y = gctx.mouse.y;
+	//cpFloat target_x = ChipmunkDemoMouse.x;
+	cpFloat target_x =gctx.mouse.x;
+	//cpFloat target_x =-600;
+  
+	ChipmunkDebugDrawSegment(cpv(target_x, -1000.0), cpv(target_x, 1000.0), RGBAColor(1.0, 0.0, 0.0, 1.0));
+	
+	cpFloat max_v = 500.0;
+	cpFloat target_v = cpfclamp(bias_coef(0.5, dt/1.2)*(target_x - cpBodyGetPosition(balance_body).x)/dt, -max_v, max_v);
+	cpFloat error_v = (target_v - cpBodyGetVelocity(balance_body).x);
+	cpFloat target_sin = 0.003*bias_coef(0.1, dt)*error_v/dt;
+	
+	cpFloat max_sin = cpfsin(0.6);
+	balance_sin = cpfclamp(balance_sin - 0.00006*bias_coef(0.2, dt)*error_v/dt, -max_sin, max_sin);
+	cpFloat target_a = -asin(cpfclamp(-target_sin + balance_sin, -max_sin, max_sin));
+	cpFloat angular_diff = -asin(cpvcross(cpBodyGetRotation(balance_body), cpvforangle(target_a)));
+	cpFloat target_w = -bias_coef(0.1, dt/0.4)*(angular_diff)/dt;
+	
+	cpFloat max_rate = 50.0;
+	cpFloat rate = cpfclamp(cpBodyGetAngularVelocity(wheel_body) + cpBodyGetAngularVelocity(balance_body) - target_w, -max_rate, max_rate);
+   dbg_x =rate;
+   dbg_y =dt;
+	cpSimpleMotorSetRate(motor, cpfclamp(rate, -max_rate, max_rate));
+	cpConstraintSetMaxForce(motor, 80000);
+}
+
+static cpSpace* create_world(){
+	//ChipmunkDemoMessageString = "This unicycle is completely driven and balanced by a single cpSimpleMotor.\nMove the mouse to make the unicycle follow it.";
+	cpSpace *space = cpSpaceNew();
+	cpSpaceSetIterations(space, 30);
+	cpSpaceSetGravity(space, cpv(0, 500));
+   {
+		cpShape *shape = NULL;
+		cpBody *staticBody = cpSpaceGetStaticBody(space);
+		
+		shape = cpSpaceAddShape(space, cpSegmentShapeNew(staticBody, cpv(-3200,240), cpv(3200,240), 0.0f));
+		cpShapeSetElasticity(shape, 1.0f);
+		cpShapeSetFriction(shape, 1.0f);
+		cpShapeSetFilter(shape, NOT_GRABBABLE_FILTER);
+
+		shape = cpSpaceAddShape(space, cpSegmentShapeNew(staticBody, cpv(0,200), cpv(240,240), 0.0f));
+		cpShapeSetElasticity(shape, 1.0f);
+		cpShapeSetFriction(shape, 1.0f);
+		cpShapeSetFilter(shape, NOT_GRABBABLE_FILTER);
+
+		shape = cpSpaceAddShape(space, cpSegmentShapeNew(staticBody, cpv(-240,240), cpv(0,200), 0.0f));
+		cpShapeSetElasticity(shape, 1.0f);
+		cpShapeSetFriction(shape, 1.0f);
+		cpShapeSetFilter(shape, NOT_GRABBABLE_FILTER);
+	}
+   {
+		cpFloat radius = 20.0;
+		cpFloat mass = 1.0;
+		
+		cpFloat moment = cpMomentForCircle(mass, 0.0, radius, cpvzero);
+		wheel_body = cpSpaceAddBody(space, cpBodyNew(mass, moment));
+		cpBodySetPosition(wheel_body, cpv(0.0, -160.0 + radius));
+		
+		cpShape *shape = cpSpaceAddShape(space, cpCircleShapeNew(wheel_body, radius, cpvzero));
+		cpShapeSetFriction(shape, 0.7);
+      cpShapeSetFilter(shape, cpShapeFilterNew(1, CP_ALL_CATEGORIES, CP_ALL_CATEGORIES));
+	}
+   {
+		cpFloat cog_offset = -30.0;
+		
+		cpBB bb1 = cpBBNew(-5.0, 0.0 - cog_offset, 5.0, cog_offset*1.2 - cog_offset);
+		cpBB bb2 = cpBBNew(-25.0, bb1.t, 25.0, bb1.t - 10.0);
+		
+		cpFloat mass = 3.0;
+		cpFloat moment = cpMomentForBox2(mass, bb1) + cpMomentForBox2(mass, bb2);
+		
+		balance_body = cpSpaceAddBody(space, cpBodyNew(mass, moment));
+		cpBodySetPosition(balance_body, cpv(0.0, cpBodyGetPosition(wheel_body).y + cog_offset));
+		
+		cpShape *shape = NULL;
+		
+		shape = cpSpaceAddShape(space, cpBoxShapeNew2(balance_body, bb1, 0.0));
+		cpShapeSetFriction(shape, 1.0);
+		cpShapeSetFilter(shape, cpShapeFilterNew(1, CP_ALL_CATEGORIES, CP_ALL_CATEGORIES));
+		
+		shape = cpSpaceAddShape(space, cpBoxShapeNew2(balance_body, bb2, 0.0));
+		cpShapeSetFriction(shape, 1.0);
+		cpShapeSetFilter(shape, cpShapeFilterNew(1, CP_ALL_CATEGORIES, CP_ALL_CATEGORIES));
+	}
+   cpVect anchorA = cpBodyWorldToLocal(balance_body, cpBodyGetPosition(wheel_body));
+	cpVect groove_a = cpvadd(anchorA, cpv(0.0,  -30.0));
+	cpVect groove_b = cpvadd(anchorA, cpv(0.0, 10.0));
+   
+	cpSpaceAddConstraint(space, cpGrooveJointNew(balance_body, wheel_body, groove_b, groove_a, cpvzero));
+	cpSpaceAddConstraint(space, cpDampedSpringNew(balance_body, wheel_body, anchorA, cpvzero, 0.0, 600, 30.0));
+	
+	motor = cpSpaceAddConstraint(space, cpSimpleMotorNew(wheel_body, balance_body, 0.0));
+	cpConstraintSetPreSolveFunc(motor, motor_preSolve);
+  
+	{
+		cpFloat width = 100.0;
+		cpFloat height = 20.0;
+		cpFloat mass = 3.0;
+		
+		cpBody *boxBody = cpSpaceAddBody(space, cpBodyNew(mass, cpMomentForBox(mass, width, height)));
+		cpBodySetPosition(boxBody, cpv(200, -100));
+		
+		cpShape *shape = cpSpaceAddShape(space, cpBoxShapeNew(boxBody, width, height, 0.0));
+		cpShapeSetFriction(shape, 0.7);
+	}
+
+	return space;
+}
+
+static void
+update(cpSpace* space, double dt)
+{
+	cpSpaceStep(space, dt);
+}
+
+cpSpace* world_space;
+
+int JIT_MAIN(jit_t* _j){
+
+   igText("DbgPoint [%f,%f]",  dbg_x, dbg_y);
+   igText("Chip!");
+   
+   //Example of inter module communication, (send Welcome rchip to others modules)
+   Nod_set_str(_j->nod, S("msg"), S("Welcome rchip"));
+   ///
+
+   create_canvas();
+   
+   drawSquare_(&gctx, (vec3){} , "(0,0)");
+   static bool one =false;
+   if(!one){one=true;
+      world_space=create_world();
+   }
+   
+   update(world_space, 1/60.0);
+   
+   ChipmunkDemoDefaultDrawImpl(world_space);
+   return 0;
+}

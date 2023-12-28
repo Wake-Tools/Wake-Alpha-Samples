@@ -1,0 +1,216 @@
+/*|| https://wake.tools ||                                                           || JIT C | Wake Alpha ||
+  | --------------------------------------------------------------------------------------------------+-+++|>
+  +-  Eye                                                                                     || @ Maeiky  ||
+  |---------------------------------------------------------------------------------------------------+-+++|>
+  +-  Basic eye using only a shader, so it can be integraded in another more complex shape
+  |
+  |  This example use Sokol, refer to:
+  |  https://github.com/floooh/sokol
+  |-----|--------|---------------------|-----------------------------|--------------------------------+-+++|>
+*/
+
+#ifndef TCC_NOJIT
+#include <tcclib.h>
+#endif
+#include <math.h>
+#include "jit.h"
+#define CIMGUI_DEFINE_ENUMS_AND_STRUCTS
+#include "cimgui.h"
+#include "sokol_gfx.h"
+
+#include "shader/eye.glsl.h"
+
+typedef float num;
+static struct {
+    sg_pass_action pass_engin;
+    sg_pipeline pip;
+    sg_bindings bind;
+    bool valid;
+} engin_state;
+
+inl vec3 proportion3(vec3 _pt2, vec3 _pt3, num _prop) {
+   return (vec3){
+   .x = _pt3.x + ((_pt2.x - _pt3.x)*_prop),
+   .y = _pt3.y + ((_pt2.y - _pt3.y)*_prop),
+   .z = _pt3.z + ((_pt2.z - _pt3.z)*_prop),
+   };
+}
+
+#define vt _->vertex[_->v]
+static void quad_(drawlist_t* _, vec3 _pTL, vec3 _pTR, vec3 _pBR, vec3 _pBL)
+{
+
+   vec3 _pTM = proportion3(_pTL, _pTR,0.5);
+   vec3 c1 = proportion3(_pTL, _pBR,0.5);//0.4 motif!
+   vec3 c2 = proportion3(_pTR, _pBL,0.5);//0.4 motif!
+
+
+   vec3 c = proportion3(c1, c2,0.5);
+   vec3 _pCe = (vec3){c.x,c.y,c.z};
+
+   float _dim = 50;
+
+
+   _->tx[_->t]=(tx_t){_->v+0, _->v+1, _->v+4};_->t++;
+   _->tx[_->t]=(tx_t){_->v+1, _->v+2, _->v+4};_->t++;
+   _->tx[_->t]=(tx_t){_->v+2, _->v+3, _->v+4};_->t++;
+   _->tx[_->t]=(tx_t){_->v+3, _->v+0, _->v+4};_->t++;
+   
+   vt.id.a=1;vt.pt=(vec4){_pTL.x,_pTL.y,_pTL.z, 1.0};vt.depth=(vec2){0.0, _dim};vt.lookat=(vec4){_pBL.x,_pBL.y,_pBL.z, 1.0};_->v++;//0
+   vt.id.a=1;vt.pt=(vec4){_pTR.x,_pTR.y,_pTR.z, 1.0};vt.depth=(vec2){0.0, _dim};vt.lookat=(vec4){_pBR.x,_pBR.y,_pBR.z, 1.0};_->v++;//1
+   vt.id.a=1;vt.pt=(vec4){_pBR.x,_pBR.y,_pBR.z, 0.0};vt.depth=(vec2){1.0, _dim};vt.lookat=(vec4){_pTR.x,_pTR.y,_pTR.z,-1.0};_->v++;//2
+   vt.id.a=1;vt.pt=(vec4){_pBL.x,_pBL.y,_pBL.z, 0.0};vt.depth=(vec2){1.0, _dim};vt.lookat=(vec4){_pTL.x,_pTL.y,_pTL.z,-1.0};_->v++;//3
+   vt.id.a=1;vt.pt=(vec4){_pCe.x,_pCe.y,_pCe.z, 0.5};vt.depth=(vec2){0.5, _dim};vt.lookat=(vec4){_pTM.x,_pTM.y,_pTM.z,-1.0};_->v++;//4 TODO Z
+}
+
+//// shared drawlist
+static vtx_t gbl_vertex[400];
+static tx_t  gbl_tx[400];
+static vec3  gbl_line[400];//make it smaller
+static drawlist_t gbl_drawlist = (drawlist_t)
+{
+   .vertex=gbl_vertex,
+   .tx=gbl_tx,
+   .line=gbl_line,
+};
+static drawlist_t* drawlist =&gbl_drawlist;
+
+static jit_t* jit;
+int JIT_MAIN(jit_t* _j){
+   jit = _j;
+  // quad_
+   drawlist_reset(drawlist);
+   float dim = 200;
+   quad_(drawlist, (vec3){.x=-dim,.y=-dim},  (vec3){.x=dim,.y=-dim}, (vec3){.x=dim,.y=dim}, (vec3){.x=-dim,.y=dim} );
+   /*
+   Nod* canvas_nod = get_module_nod(S("canvas"));
+   drawlist = Nod_get_ptr(canvas_nod, S("drawlist"));
+   if(drawlist==0){
+      igText("error, could'nt find canvas drawlist");
+      return 0;
+   }
+   */
+   igText("dim : %f, %f", _j->shp.iResolution.x, _j->shp.iResolution.y);
+   igText("iTime : %f", _j->shp.iTime);
+   igText("iTimeDelta : %f", _j->shp.iTimeDelta);
+   igText("iMouse: %f, %f ", _j->shp.iMouse.x,  _j->shp.iMouse.y);
+   igText("iOffset: %f, %f ", _j->shp.iOffset.x,  _j->shp.iOffset.y);
+
+   view_t test = (view_t){.data="aaaaa", .size=5};
+
+   igText("Nod Str: %s",  Nod_get_str_c(_j->nod, S("Test")));
+   igText("Nod Int: %d",  Nod_get_int(_j->nod, S("TestInt")));
+   
+   
+   Nod* rchip = get_module_nod(S("rchip"));
+   igText("Ex Module: %s",  Nod_get_str(rchip, S("msg")).data);
+   
+   static int count = 0;
+
+   if(_j->state==JIT_INI){count++;
+      sg_shader sh = get_module_shader(S("eye"),S("eye"));
+      sg_buffer_desc _buff_desc = (sg_buffer_desc){
+         .size = 4096*100, //TODO max size
+         .usage = SG_USAGE_STREAM,
+         .label = "quad-vertices",
+      };
+      engin_state.bind.vertex_buffers[0] = sg_make_buffer(&_buff_desc);
+
+      sg_buffer_desc _idx_buff_desc=(sg_buffer_desc){
+         .size = 4096*20, //TODO max size
+         .type = SG_BUFFERTYPE_INDEXBUFFER,
+         .usage = SG_USAGE_STREAM,
+         .label = "quad-indices"
+      };
+      engin_state.bind.index_buffer = sg_make_buffer(&_idx_buff_desc);
+      
+      
+      // a pipeline state object 
+      sg_vertex_layout_state _layout = {};
+      _layout.attrs[ATTR_vs_position].format = SG_VERTEXFORMAT_FLOAT4;
+      //_layout.attrs[ATTR_vs_color0].format   = SG_VERTEXFORMAT_FLOAT4;
+      _layout.attrs[ATTR_vs_lookat].format   = SG_VERTEXFORMAT_FLOAT4;
+      _layout.attrs[ATTR_vs_lookatV].format   = SG_VERTEXFORMAT_FLOAT4;
+      _layout.attrs[ATTR_vs_depth].format    = SG_VERTEXFORMAT_FLOAT2;
+      _layout.attrs[ATTR_vs_id].format   	   = SG_VERTEXFORMAT_UBYTE4;//SG_VERTEXFORMAT_SHORT4//SG_VERTEXFORMAT_BYTE4 //SG_VERTEXFORMAT_UBYTE4
+
+
+      sg_pipeline_desc _pip_desc = (sg_pipeline_desc){
+
+         .shader = sh,
+         .layout = _layout,
+         .index_type = SG_INDEXTYPE_UINT16,
+         .label = "quad-pipeline",
+      };
+
+      /// == Alpha test == ////
+
+      _pip_desc.colors[0].blend.enabled = true;
+      _pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+      _pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+      _pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_DST_ALPHA;
+      _pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+      _pip_desc.colors[0].write_mask = SG_COLORMASK_RGBA;
+
+      /// == Depth test == ////
+    //  _pip_desc.depth.compare = SG_COMPAREFUNC_LESS;
+    //  _pip_desc.depth.write_enabled = true;
+      
+      engin_state.pip = sg_make_pipeline(&_pip_desc);
+
+      // default pass action 
+      engin_state.pass_engin = (sg_pass_action) {};
+      engin_state.pass_engin.colors[0] = (sg_color_attachment_action){ 
+         .load_action=SG_LOADACTION_LOAD
+         //.load_action=SG_LOADACTION_CLEAR, .clear_value ={0.0f, 0.0f, 0.0f, 0.5f } 
+      };
+      engin_state.valid=true;
+   }
+   
+
+   igText("count : %d",count); 
+  // igText("shader_id: %d",sh.id); 
+   
+   static int count2 = 0;count2++;
+   igText("count2: %d",count2); 
+   igText("vertex_buffers: %d",engin_state.bind.vertex_buffers[0]); 
+   
+   if(engin_state.valid){
+      
+      uint32_t  vb_offset = sg_append_buffer(engin_state.bind.vertex_buffers[0],  &(sg_range){drawlist->vertex, 	(drawlist->v) * sizeof(vtx_t)});
+      uint32_t  ib_offset = sg_append_buffer(engin_state.bind.index_buffer, 		&(sg_range){drawlist->tx, 		(drawlist->t) * sizeof(tx_t)});
+
+      sg_begin_default_pass(&engin_state.pass_engin, _j->shp.iResolution.x, _j->shp.iResolution.y);
+      sg_apply_pipeline(engin_state.pip);
+      sg_apply_bindings(&engin_state.bind);
+
+      vs_params_t vs_params;
+      vs_params.iMouse[0]=       _j->shp.iMouse.x;
+      vs_params.iMouse[1]=       _j->shp.iMouse.y;
+
+      vs_params.iResolution[0]=  _j->shp.iResolution.x;
+      vs_params.iResolution[1]=  _j->shp.iResolution.y;
+      vs_params.iResolution[2]=  _j->shp.iResolution.z;
+
+      vs_params.iOffset[0]=  _j->shp.iOffset.x;
+      vs_params.iOffset[1]=  _j->shp.iOffset.y;
+
+      vs_params.iTime=           _j->shp.iTime;
+      vs_params.iTimeDelta=      _j->shp.iTimeDelta;
+      
+      
+      sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &(sg_range){&vs_params, sizeof(vs_params)});
+      sg_apply_uniforms(SG_SHADERSTAGE_FS, SLOT_vs_params, &(sg_range){&vs_params, sizeof(vs_params)});
+
+      sg_draw(0, drawlist->t* sizeof(tx_t)/ sizeof(uint16_t), 1);
+
+   igText("vtx count : %d",drawlist->v); 
+   
+      sg_end_pass();
+      sg_commit();
+      //vertex_reset(_j);
+      
+   }
+
+   return 0;
+ }

@@ -1,0 +1,36 @@
+/*|| https://wake.tools ||                                                           || JIT C | Wake Alpha ||
+  | --------------------------------------------------------------------------------------------------+-+++|>
+  +-  Hello World                                                                             || @ Maeiky  ||
+  |---------------------------------------------------------------------------------------------------+-+++|>
+  +- Minimal example using cimgui
+  |
+  |  This example use CImgui, please refer to:
+  |  https://github.com/ocornut/imgui
+  |  https://github.com/cimgui/cimgui
+  |  & "Wake-Alpha\Rc\tcc\lib_inc\cimgui.h"
+  |-----|--------|---------------------|-----------------------------|--------------------------------+-+++|>
+*/
+
+#include "jit.h"
+#include "imgui_draw.h"
+#include "shader_draw.h"
+
+static jit_t* jit;
+int JIT_MAIN(jit_t* _j){
+   jit = _j;
+
+   igText("dim : %f, %f",     _j->shp.iResolution.x, _j->shp.iResolution.y);
+   igText("iTime : %f",       _j->shp.iTime);
+   igText("iTimeDelta : %f",  _j->shp.iTimeDelta);
+   igText("iMouse: %f, %f ",  _j->shp.iMouse.x,      _j->shp.iMouse.y);
+
+   if(jit->state==JIT_INI){
+      //Initialisation stuff...
+   }
+
+   //Example of inter module communication, (search for "rchip", if opened)
+   Nod* rchip = get_module_nod(S("rchip"));
+   igText("Ex Module: %s",  Nod_get_str(rchip, S("msg")).data);
+   
+   return 0;
+ }

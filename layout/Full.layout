@@ -1,0 +1,119 @@
+{
+"layout": {
+  "ini_settings": "[Window][MainWindowHost]
+Pos=0,0
+Size=944,818
+Collapsed=0
+
+[Window][Debug##Default]
+Pos=60,60
+Size=400,400
+Collapsed=0
+
+[Window][rchip]
+Pos=0,19
+Size=261,279
+Collapsed=0
+DockId=0x0000000D,0
+
+[Window][eye]
+Pos=0,579
+Size=261,239
+Collapsed=0
+DockId=0x0000000A,0
+
+[Window][psphere]
+Pos=0,300
+Size=261,277
+Collapsed=0
+DockId=0x0000000E,0
+
+[Window][space]
+Pos=263,19
+Size=410,495
+Collapsed=0
+DockId=0x0000000B,0
+
+[Window][ribbon]
+Pos=263,516
+Size=410,302
+Collapsed=0
+DockId=0x0000000C,0
+
+[Window][IA_string]
+Pos=675,421
+Size=269,397
+Collapsed=0
+DockId=0x00000002,0
+
+[Window][image_load]
+Pos=675,19
+Size=135,400
+Collapsed=0
+DockId=0x00000005,0
+
+[Window][Files]
+Pos=812,19
+Size=132,400
+Collapsed=0
+DockId=0x00000006,0
+
+[Table][0x8D315E65,6]
+RefScale=13
+Column 0  Width=26 Sort=0v
+Column 1  Width=133
+Column 2  Width=47
+Column 3  Width=54
+Column 4  Width=133
+Column 5  Width=68
+
+[Table][0x04858A11,3]
+RefScale=13
+Column 0  Width=26 Sort=0v
+Column 1  Width=40
+Column 2  Width=40
+
+[Docking][Data]
+DockSpace         ID=0x7FF8B20B Window=0xAE55842F Pos=-1285,100 Size=944,799 Split=X
+  DockNode        ID=0x00000007 Parent=0x7FF8B20B SizeRef=261,799 Split=Y Selected=0xA0CA3C3E
+    DockNode      ID=0x00000009 Parent=0x00000007 SizeRef=280,558 Split=Y Selected=0xA0CA3C3E
+      DockNode    ID=0x0000000D Parent=0x00000009 SizeRef=280,279 Selected=0xA0CA3C3E
+      DockNode    ID=0x0000000E Parent=0x00000009 SizeRef=280,277 Selected=0x1D424AAE
+    DockNode      ID=0x0000000A Parent=0x00000007 SizeRef=280,239 Selected=0x919FC04C
+  DockNode        ID=0x00000008 Parent=0x7FF8B20B SizeRef=681,799 Split=X
+    DockNode      ID=0x00000003 Parent=0x00000008 SizeRef=410,799 Split=Y
+      DockNode    ID=0x0000000B Parent=0x00000003 SizeRef=391,495 CentralNode=1 Selected=0xD98660F2
+      DockNode    ID=0x0000000C Parent=0x00000003 SizeRef=391,302 Selected=0x18335CC1
+    DockNode      ID=0x00000004 Parent=0x00000008 SizeRef=269,799 Split=Y Selected=0x17F00D0F
+      DockNode    ID=0x00000001 Parent=0x00000004 SizeRef=202,400 Split=X Selected=0x17F00D0F
+        DockNode  ID=0x00000005 Parent=0x00000001 SizeRef=135,400 Selected=0x17F00D0F
+        DockNode  ID=0x00000006 Parent=0x00000001 SizeRef=132,400 Selected=0x86FA2F90
+      DockNode    ID=0x00000002 Parent=0x00000004 SizeRef=202,397 Selected=0x84E82116
+
+",
+  "module": {
+    "IA_string": {
+      "open": true
+},
+    "eye": {
+      "open": true
+},
+    "image_load": {
+      "open": true
+},
+    "psphere": {
+      "open": true
+},
+    "rchip": {
+      "open": true
+},
+    "ribbon": {
+      "open": true
+},
+    "space": {
+      "open": true
+}
+}
+}
+
+}

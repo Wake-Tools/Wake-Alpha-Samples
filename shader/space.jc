@@ -1,0 +1,162 @@
+/*|| https://wake.tools ||                                                            || GLSL | Wake Alpha ||
+  | --------------------------------------------------------------------------------------------------+-+++|>
+  +-  Space                                                                                   || @ Maeiky  ||
+  |---------------------------------------------------------------------------------------------------+-+++|>
+  +-  An simple example to show how to use a Shadertoy code, inside wake
+  |
+  |   Using this shader:
+  |   https://www.shadertoy.com/view/MslGWN
+  |
+  |-----|--------|---------------------|-----------------------------|--------------------------------+-+++|>
+*/
+#include "jit.h"
+#include "sokol_gfx.h"
+#include "shader_draw.h"
+#include "imgui_draw.h"
+
+#include "shader/space.glsl.h"
+
+static struct {
+    sg_pass_action pass_engin;
+    sg_pipeline pip;
+    sg_bindings bind;
+    bool valid;
+} engin_state;
+
+
+//// shared drawlist
+static vtx_t gbl_vertex[400];
+static tx_t  gbl_tx[400];
+static vec3  gbl_line[400];//make it smaller
+static drawlist_t gbl_drawlist = (drawlist_t)
+{
+   .vertex=gbl_vertex,
+   .tx=gbl_tx,
+   .line=gbl_line,
+};
+
+static drawlist_t* drawlist =&gbl_drawlist;
+
+static jit_t* jit;
+int JIT_MAIN(jit_t* _j){
+   jit = _j;
+   
+   drawlist_reset(drawlist);
+   float dim_x = _j->shp.iResolution.x/2.0;
+   float dim_y = _j->shp.iResolution.y/2.0;
+   draw_quad4(drawlist, (vec3){.x=-dim_x,.y=-dim_y},  (vec3){.x=dim_x,.y=-dim_y}, (vec3){.x=dim_x,.y=dim_y}, (vec3){.x=-dim_x,.y=dim_y},0 );
+
+   igText("dim : %f, %f", _j->shp.iResolution.x, _j->shp.iResolution.y);
+   igText("iTime : %f", _j->shp.iTime);
+   igText("iTimeDelta : %f", _j->shp.iTimeDelta);
+
+   igText("iMouse: %f, %f ", _j->shp.iMouse.x,  _j->shp.iMouse.y);
+   igText("iOffset: %f, %f ", _j->shp.iOffset.x,  _j->shp.iOffset.y);
+
+   view_t test = (view_t){.data="aaaaa", .size=5};
+
+   igText("Nod Str: %s",  Nod_get_str_c(_j->nod, S("Test")));
+   igText("Nod Int: %d",  Nod_get_int(_j->nod, S("TestInt")));
+     
+   static int count = 0;
+
+   if(_j->state==JIT_INI){count++;
+      sg_shader sh = get_module_shader(S("space"),S("space"));
+      sg_buffer_desc _buff_desc = (sg_buffer_desc){
+         .size = 4096*100, //TODO max size
+         .usage = SG_USAGE_STREAM,
+         .label = "quad-vertices",
+      };
+      engin_state.bind.vertex_buffers[0] = sg_make_buffer(&_buff_desc);
+
+      sg_buffer_desc _idx_buff_desc=(sg_buffer_desc){
+         .size = 4096*20, //TODO max size
+         .type = SG_BUFFERTYPE_INDEXBUFFER,
+         .usage = SG_USAGE_STREAM,
+         .label = "quad-indices"
+      };
+      engin_state.bind.index_buffer = sg_make_buffer(&_idx_buff_desc);
+      
+      
+      // a pipeline state object 
+      sg_vertex_layout_state _layout = {};
+      _layout.attrs[ATTR_vs_position].format = SG_VERTEXFORMAT_FLOAT4;
+      _layout.attrs[ATTR_vs_lookat].format   = SG_VERTEXFORMAT_FLOAT4;
+      _layout.attrs[ATTR_vs_lookatV].format   = SG_VERTEXFORMAT_FLOAT4;
+      _layout.attrs[ATTR_vs_depth].format    = SG_VERTEXFORMAT_FLOAT2;
+      _layout.attrs[ATTR_vs_id].format   	   = SG_VERTEXFORMAT_UBYTE4;//SG_VERTEXFORMAT_SHORT4//SG_VERTEXFORMAT_BYTE4 //SG_VERTEXFORMAT_UBYTE4
+
+
+      sg_pipeline_desc _pip_desc = (sg_pipeline_desc){
+
+         .shader = sh,
+         .layout = _layout,
+         .index_type = SG_INDEXTYPE_UINT16,
+         .label = "quad-pipeline",
+      };
+
+      /// == Alpha test == ////
+
+      _pip_desc.colors[0].blend.enabled = true;
+      _pip_desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+      _pip_desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+      _pip_desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_DST_ALPHA;
+      _pip_desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+      _pip_desc.colors[0].write_mask = SG_COLORMASK_RGBA;
+
+      /// == Depth test == ////
+      //_pip_desc.depth.compare = SG_COMPAREFUNC_LESS;
+      //_pip_desc.depth.write_enabled = true;
+      
+      engin_state.pip = sg_make_pipeline(&_pip_desc);
+
+      // default pass action 
+      engin_state.pass_engin = (sg_pass_action) {};
+      engin_state.pass_engin.colors[0] = (sg_color_attachment_action){ 
+         .load_action=SG_LOADACTION_LOAD
+         //.load_action=SG_LOADACTION_CLEAR, .clear_value ={0.0f, 0.0f, 0.0f, 0.5f } 
+      };
+      engin_state.valid=true;
+   }
+
+   igText("count : %d",count); 
+   
+   igText("vertex_buffers: %d",engin_state.bind.vertex_buffers[0]); 
+   
+   if(engin_state.valid){
+      
+      uint32_t  vb_offset = sg_append_buffer(engin_state.bind.vertex_buffers[0],  &(sg_range){drawlist->vertex, 	(drawlist->v) * sizeof(vtx_t)});
+      uint32_t  ib_offset = sg_append_buffer(engin_state.bind.index_buffer, 		&(sg_range){drawlist->tx, 		(drawlist->t) * sizeof(tx_t)});
+
+      sg_begin_default_pass(&engin_state.pass_engin, _j->shp.iResolution.x, _j->shp.iResolution.y);
+      sg_apply_pipeline(engin_state.pip);
+      sg_apply_bindings(&engin_state.bind);
+
+      vs_params_t vs_params;
+      vs_params.iMouse[0]=       _j->shp.iMouse.x;
+      vs_params.iMouse[1]=       _j->shp.iMouse.y;
+
+      vs_params.iResolution[0]=  _j->shp.iResolution.x;
+      vs_params.iResolution[1]=  _j->shp.iResolution.y;
+      vs_params.iResolution[2]=  _j->shp.iResolution.z;
+      
+      vs_params.iOffset[0]=  _j->shp.iOffset.x;
+      vs_params.iOffset[1]=  _j->shp.iOffset.y;
+
+      vs_params.iTime=           _j->shp.iTime;
+      vs_params.iTimeDelta=      _j->shp.iTimeDelta;
+      
+      
+      sg_apply_uniforms(SG_SHADERSTAGE_VS, SLOT_vs_params, &(sg_range){&vs_params, sizeof(vs_params)});
+      sg_apply_uniforms(SG_SHADERSTAGE_FS, SLOT_vs_params, &(sg_range){&vs_params, sizeof(vs_params)});
+
+      sg_draw(0, drawlist->t* sizeof(tx_t)/ sizeof(uint16_t), 1);
+
+      igText("vtx count : %d",drawlist->v); 
+   
+      sg_end_pass();
+      sg_commit();
+   }
+   
+   return 0;
+ }

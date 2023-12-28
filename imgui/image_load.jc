@@ -1,0 +1,519 @@
+/*|| https://wake.tools ||                                                         || JIT C99 | Wake Alpha ||
+  | --------------------------------------------------------------------------------------------------+-+++|>
+  +-  Image Load                                                                               || @ Maeiky ||
+  |---------------------------------------------------------------------------------------------------+-+++|>
+  +-  This is the Hello World of IA. This example is for building your own dataset of numbers.
+  |   Then with a lot of handdraw numbers, you can train your IA to create digit recognition.
+  |   Warning, this example is incomplete, but if you want to go further, you can use Darknet 
+  |   included to train your dataset.
+  |
+  |-----|--------|---------------------|-----------------------------|--------------------------------+-+++|>
+*/
+#include "jit.h"
+#include "imgui_draw.h"
+
+DrawCtx gctx;
+
+///--------------------------------------------------------------------------------------------
+///==|CANVAS|==
+///============================================================================================
+static float dbg_x = 0;
+static float dbg_y = 0;
+
+
+static void create_canvas(){
+   ImGuiIO* io = igGetIO();
+   ImDrawList* draw_list = igGetWindowDrawList();
+   static bool opt_enable_grid = true;
+   static bool opt_enable_context_menu = true;
+   static bool adding_line = false;
+            
+   static float zoom=1.0;
+   igSliderFloat("Zoom", &zoom,  0.5f, 8.0f, "%.02f",0);
+
+   ImVec2 canvas_p0;igGetCursorScreenPos(&canvas_p0);      // ImDrawList API uses screen coordinates!
+   ImVec2 canvas_sz;igGetContentRegionAvail(&canvas_sz);   // Resize canvas to what's available
+   if (canvas_sz.x < 50.0f) canvas_sz.x = 50.0f;
+   if (canvas_sz.y < 50.0f) canvas_sz.y = 50.0f;
+   ImVec2 canvas_p1 = (ImVec2){canvas_p0.x + canvas_sz.x, canvas_p0.y + canvas_sz.y};
+
+
+   igInvisibleButton("canvas", canvas_sz, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+   const bool is_hovered = igIsItemHovered(0); // Hovered
+   const bool is_active = igIsItemActive();   // Held
+
+   static ImVec2 camera = (ImVec2){0,0};
+   static bool one=false;
+   if(!one){one=true;
+      camera.x=canvas_sz.x-canvas_sz.x/2;
+      camera.y=canvas_sz.y-canvas_sz.y/2;
+   }
+
+   const float mouse_threshold_for_pan = opt_enable_context_menu ? -1.0f : 0.0f;
+   if (is_active && igIsMouseDragging(ImGuiMouseButton_Right, mouse_threshold_for_pan))
+   {
+      camera.x += io->MouseDelta.x;
+      camera.y += io->MouseDelta.y;
+   }
+   
+   const ImVec2 origin= (ImVec2){canvas_p0.x + camera.x, canvas_p0.y + camera.y}; // Lock scrolled origin
+   const ImVec2 mouse_pos_in_canvas = (ImVec2){ io->MousePos.x - origin.x, io->MousePos.y - origin.y};
+   
+   static Point mouse = {}; //TODO get Global mouse?
+   if(mouse_pos_in_canvas.x> -3400000000000000000000000.0 ){
+      mouse = (Point){.x=mouse_pos_in_canvas.x,.y=mouse_pos_in_canvas.y};
+   }
+   
+    gctx = (DrawCtx){.ctx=draw_list,
+                        .origin=origin,
+                        .zoom=zoom,
+                        .camera=camera,
+                        .hsize=(Point){.x=canvas_sz.x/2,.y=canvas_sz.y/2},
+                        .mouse=mouse,
+      };
+  
+      
+   // Context menu (under default mouse threshold)
+   ImVec2 drag_delta;igGetMouseDragDelta(&drag_delta, ImGuiMouseButton_Right, -1.0f);
+   if (opt_enable_context_menu && drag_delta.x == 0.0f && drag_delta.y == 0.0f)
+       igOpenPopupOnItemClick("context", ImGuiPopupFlags_MouseButtonRight);
+   if (igBeginPopup("context",0))
+   {
+      int idxp=0;
+       if (igMenuItem_Bool("Remove one", NULL, false, idxp )) {  }
+       if (igMenuItem_Bool("Remove all", NULL, false, idxp )) {  }
+       igEndPopup();
+   }
+   
+   float th = 1.0;
+   //Draw grid + all lines in the canvas
+   ImDrawList_PushClipRect(draw_list, canvas_p0, canvas_p1, true);
+   if (opt_enable_grid)
+   {
+       const float GRID_STEP = 64.0f*zoom;
+       for (float x = fmodf(camera.x, GRID_STEP); x < canvas_sz.x; x += GRID_STEP)
+            ImDrawList_AddLine(draw_list,
+            (ImVec2){(canvas_p0.x + x)*1, (canvas_p0.y)*1},
+            (ImVec2){(canvas_p0.x + x)*1, (canvas_p1.y)*1}, IM_COL32(200, 200, 200, 40),th);
+
+       for (float y = fmodf(camera.y, GRID_STEP); y < canvas_sz.y; y += GRID_STEP)
+            ImDrawList_AddLine(draw_list,
+            (ImVec2){(canvas_p0.x)*1, (canvas_p0.y + y)*1},
+            (ImVec2){(canvas_p1.x)*1, (canvas_p0.y + y)*1}, IM_COL32(200, 200, 200, 40),th);
+   }
+}
+
+
+enum MyItemColumnID
+{
+    MyItemColumnID_ID,
+    MyItemColumnID_Name,
+    MyItemColumnID_Action,
+    MyItemColumnID_Quantity,
+    MyItemColumnID_Description
+};
+
+#define MAX_FILENAME_SIZE 25
+typedef struct file_t{
+   int id;
+   bool selected;
+   char name[MAX_FILENAME_SIZE];
+}file_t;
+
+#define MAX_FILES  9999
+ARRAY_fixed(Files, file_t, MAX_FILES);
+
+Files aFile={};
+static int folder_current_idx = 0;
+static int item_current_idx = -1;
+
+
+static void clear_img(uint32_t* _img, int _width, int _height, uint32_t _col){//TODO memset
+   for(int iy=0;iy<_height;iy++){
+      for(int ix=0;ix<_height;ix++){
+           _img[iy*_width+ ix]=_col;
+      }
+   }
+}
+
+void getfile(char* _base_dir, char* _dir ,char* _name)
+{
+  file_t* f = Files_add(&aFile, (file_t){.id=aFile.size});
+  strncpy(f->name, _name,MAX_FILENAME_SIZE);
+}
+
+///////////////
+#define MAX_TRAIN_FILES  9999
+#define MAX_PATH_SIZE 255
+typedef struct train_file_t{
+   int id;
+   char fullpath[MAX_PATH_SIZE];
+}train_file_t;
+ARRAY_fixed(TrainFiles, train_file_t, MAX_TRAIN_FILES);
+ARRAY_fixed(TrainList, char*, MAX_TRAIN_FILES);
+TrainFiles aTrainFile={};
+TrainList  aTrainList={};
+//
+void get_train_file(char* _base_dir, char* _dir ,char* _name)
+{
+  train_file_t* f = TrainFiles_add(&aTrainFile, (train_file_t){.id=aTrainFile.size});
+                    TrainList_add( &aTrainList, f->fullpath);
+  snprintf(f->fullpath,MAX_PATH_SIZE, "%s%s/%s",  _base_dir,_dir, _name);
+}
+//////////////
+
+#include <dirent.h>
+FileNod file_img={};
+FileNod file_dweight={};
+FileNod file_dcfg={};
+
+std_array_t master_mem; //= _init_mem(10);
+void select_folder(int _idx);
+
+void initialize(){
+   master_mem =  _init_mem(10);
+   FileNod_ini(&file_img, &master_mem);
+  	file_img.type = FILENODE_PNG;
+   select_folder(0);
+}
+
+///--------------------------------------------------------------------------------------------
+///==|DRAW|==
+///============================================================================================
+
+inl num distance_( vec2 _pt1, vec2 _pt2 ) {
+   num x  = _pt1.x - _pt2.x;
+   num y  = _pt1.y - _pt2.y;
+   return sqrt(x*x+ y*y);
+}
+
+static void draw_pix(uint32_t* _img, uint _x, uint _y, int _width, int _height, uint32_t _col){
+   if(_x<_width && _y<_height){
+         uint32_t _nPixelFrame =  _col;
+         uint32_t _nPixelClip =  _img[_y*_width+ _x] ;
+
+      	uint32_t _nFrameAlpha = (( _nPixelFrame >> 24 ) & 0xFF);
+         uint32_t _nClipAlpha = (( _nPixelClip >> 24 ) & 0xFF);
+
+         uint32_t _nFrameRed = ( _nPixelFrame >> 16 ) & 0xFF;
+         uint32_t _nFrameBlue = ( _nPixelFrame >> 8 ) & 0xFF;
+         uint32_t _nFrameGreen =  _nPixelFrame  & 0xFF;
+
+         uint32_t _nClipRed = ( _nPixelClip >> 16 ) & 0xFF;
+         uint32_t _nClipBlue = ( _nPixelClip >> 8 ) & 0xFF;
+         uint32_t _nClipGreen =  _nPixelClip  & 0xFF;
+
+         _nClipRed = _nClipRed + (_nFrameRed - _nClipRed)* _nFrameAlpha / 255;
+         _nClipBlue = _nClipBlue +  (_nFrameBlue - _nClipBlue) * _nFrameAlpha / 255;
+         _nClipGreen = _nClipGreen + (_nFrameGreen - _nClipGreen ) * _nFrameAlpha / 255;
+
+         _nClipAlpha = _nClipAlpha + (255 - _nClipAlpha) *  _nFrameAlpha / 255 ;
+
+         if (_nClipAlpha > 255) {
+            _nClipAlpha = 255;
+         }
+         _img[_y*_width+ _x] = (_nClipAlpha << 24 ) | (_nClipRed << 16 ) | ( _nClipBlue << 8 ) | _nClipGreen;
+   }
+}
+static void draw_spot(uint32_t* _img, uint _x, uint _y, int _width, int _height, num _radius){
+   
+   num x = -_radius/2-1.0;
+   num y = -_radius/2-1.0;
+   
+   int rad = _radius;
+   for(int y=-rad/2-1; y<rad-1;y++){
+      for(int x=-rad/2-1; x<rad-1;x++){
+         num d =  distance_((vec2){}, (vec2){x,y})/_radius;
+    
+         int alpha = (((1.0-d*d))*255);
+         
+         if(alpha<0)alpha=0;
+         if(alpha>255)alpha=255;
+         
+         uint8_t gray = (d*255)*alpha/ 255;
+         uint8_t color =0;
+         uint32_t col = ((alpha)<<24)|(color<<16)|(color<<8)|color;
+         draw_pix(_img,x+_x,y+_y,_width,_height,col);
+      }
+   }
+}
+
+static void show_img(uint32_t* _img, int _width, int _height, vec3 _pos, num _pix_size){//, char _alpha
+   num sz=_pix_size;
+   num sz2=sz*2;
+   num x = 0;
+   num y = 0;
+   num ox = 0 +sz;
+   num oy = 0 +sz;
+   
+   if(igIsMouseDown_Nil(ImGuiMouseButton_Left)){
+      uint x = (gctx.mouse.x-_pos.x)/sz2/gctx.zoom;
+      uint y = (gctx.mouse.y-_pos.y)/sz2/gctx.zoom;
+      dbg_x=x;
+      dbg_y=y;
+      if(x<_width && y <_height){
+         draw_spot(_img,x,y,_width,_height, 4.0);
+      }
+   }
+   
+   for(int iy=0;iy<_height;iy++){
+      num yy = oy+y;x=0;
+      for(int ix=0;ix<_height;ix++){
+         num xx=ox+x;
+         uint32_t col = _img[iy*_width+ ix];
+         drawRectFilled(&gctx, (vec3){xx,yy},sz,sz, col);//col&0x00FFFFFF|0xA0000000
+       x+=sz2;
+      }y+=sz2;
+   }
+}
+
+///--------------------------------------------------------------------------------------------
+///==|EDITOR|==
+///============================================================================================
+
+#define PATH "../../../Desktop/data/IA/numbers/64x64/"
+char PATH_DN_CFG[]= "../../../Desktop/data/IA/numbers/dnNum.cfg";
+char PATH_DN_WEIGHT[]= "../../../Desktop/data/IA/numbers/dnNum.weight";
+char* items[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10" ,
+  // "a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z"
+};
+
+char* labels_items[] = {"/0/", "1/", "/2/", "/3/", "/4/", "/5/", "/6/", "/7/", "/8/", "/9/", "/10/"  };
+
+static char path[255] = PATH;
+char* end_path=&path[sizeof(PATH)-1];
+
+
+static void file_tbl(){
+ float TEXT_BASE_HEIGHT = igGetTextLineHeightWithSpacing();
+    
+ static ImGuiTableFlags flags =
+      ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable | ImGuiTableFlags_Hideable | ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti
+      | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV | ImGuiTableFlags_NoBordersInBody
+      | ImGuiTableFlags_ScrollY;
+      
+      int col_count = 3;
+      if (
+      igBeginTable("table_sorting", col_count, flags, (ImVec2){0.0f, TEXT_BASE_HEIGHT * (aFile.size+1)}, 0.0f)){
+      igTableSetupColumn("ID",       ImGuiTableColumnFlags_DefaultSort|ImGuiTableColumnFlags_WidthFixed,   0.0f, MyItemColumnID_ID);
+      igTableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed,   0.0f, MyItemColumnID_Name);
+      igTableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed,   0.0f, MyItemColumnID_Name);
+      igTableHeadersRow();
+
+
+      // SHOW DATA //
+      for(int i=0;i<aFile.size; i++){
+         igPushID_Int( aFile.data[i].id );
+            igTableNextRow(0,0);
+            igTableNextColumn();
+
+           // const bool item_is_selected = selection.contains(item->ID);
+            const bool item_is_selected = true;
+   
+            ImGuiSelectableFlags selectable_flags =  ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap;
+            
+            char label[32];
+            sprintf(label, "%04d", aFile.data[i].id);
+            if (igSelectable_Bool(label, item_current_idx==i, selectable_flags, (ImVec2){0,0}))
+            {
+               item_current_idx =i;
+               
+               strcpy(end_path, items[folder_current_idx]);
+               char* end = end_path;
+               while(*end!=0)end++;
+               char* restore = end;
+               *end='/';end++;
+               end+=sprintf(end, "%s", aFile.data[i].name);
+               FileNod_Reload(&file_img, path);
+               *restore='\0';
+            }
+            igTableNextColumn();
+            igTextUnformatted(aFile.data[i].name,0);
+            igTableNextColumn();
+            
+         igPopID();  
+      }
+      igEndTable();
+   }
+}
+
+void select_folder_func(int _idx, file_fptr _func){
+   folder_current_idx = _idx;
+   strcpy(end_path, items[_idx]);
+   Files_reset(&aFile);
+   path_read_dir(path, _func );
+}
+void select_folder(int _idx){
+   select_folder_func( _idx, &getfile);
+}
+void select_train_folder(){
+   for (int n = 0; n < sizeof(items)/ sizeof(char*); n++){
+      select_folder_func(n, &get_train_file);
+   }
+}
+
+static void subwindow_Files(){
+   bool p_open = true;
+   if (igBegin( "Files", &p_open, 0))
+   {
+      // Here we store our selection data as an index.
+      if (igBeginListBox("##listbox", (ImVec2){40,-1})) {
+      for (int n = 0; n < sizeof(items)/ sizeof(char*); n++){
+         const bool is_selected = (folder_current_idx == n);
+         if (igSelectable_Bool(items[n], is_selected,0,(ImVec2){} )){
+            select_folder(n);
+         }
+      }
+      igEndListBox();
+      }
+      igSameLine(0,-1);
+  
+      file_tbl();
+   }
+   igEnd();
+}
+
+
+static void editor(){
+   igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0,1,1,0.4});
+   {
+      if(igIsKeyPressed_Bool(ImGuiKey_Space,false) || igButton("New", (ImVec2){50,20})){
+         //(Optionnally) save current draw
+         FileNod_Write(&file_img);
+         ////////////////////////
+         clear_img(file_img.datatype, file_img.dim.w, file_img.dim.h, 0xFFFFFFFF);
+         strcpy(end_path, items[folder_current_idx]);
+         char* end = end_path;
+         while(*end!=0)end++;
+         char* restore = end;
+         *end='/';end++;
+         end+=sprintf(end, "%d_%d", args->posxtime, aFile.size);
+         *end='.';end++;
+         *end='p';end++;
+         *end='n';end++;
+         *end='g';end++;
+         *end='\0';
+         //SAVE & Relaod//
+         FileNod_LoadFile(&file_img, path);
+         file_img.dim.w=64;
+         file_img.dim.h=64;
+         file_img.dim.d=4;
+         file_img.datatype=_malloc(file_img.dim.w*file_img.dim.h*file_img.dim.d, char);
+         clear_img(file_img.datatype, file_img.dim.w, file_img.dim.h, 0xFFFFFFFF);
+         FileNod_Write(&file_img);
+         _free(file_img.datatype);
+         FileNod_Reload(&file_img, path);
+          //////////////
+         *restore='\0'; //restore
+         Files_reset(&aFile);
+         path_read_dir(path, &getfile );
+         item_current_idx = aFile.size-1;
+        
+      }igSameLine(0,-1);
+      
+      if(igButton("Clear", (ImVec2){50,20})){
+         clear_img(file_img.datatype, file_img.dim.w, file_img.dim.h, 0xFFFFFFFF);
+   
+      }igSameLine(0,-1);
+      
+      if(igButton("Save", (ImVec2){50,20})){
+         FileNod_Write(&file_img);
+          
+      }igSameLine(0,-1);
+   }
+   igPopStyleColor(1);
+}
+
+///--------------------------------------------------------------------------------------------
+///==|DARKNET|==
+///============================================================================================
+#include "darknet.h"
+//network* net;
+network net; 
+clock_t timer;
+
+void dn_train(){
+   static float avg_loss = -1;
+   int imgs = 100;
+   int i = *net.seen/imgs;
+   
+   static bool ini =false;
+   if(!ini){ini=true;
+      //TODO Do some IA learning stuff..
+      //printf("Learning Rate: %g, Momentum: %g, Decay: %g\n", net.learning_rate, net.momentum, net.decay);
+      //timer=clock();
+      //data train = load_data_old(aTrainList.data, imgs, aTrainList.size, labels_items, sizeof(labels_items)/ sizeof(char*), net.w, net.h);
+      //
+      //printf("Loaded: %lf seconds\n", sec(clock()-timer));
+      //timer=clock();
+      //float loss = train_network(&net, train);
+      //....
+      //if(avg_loss == -1) avg_loss = loss;
+      //avg_loss = avg_loss*.9 + loss*.1;
+      //printf("%d: %f, %f avg, %lf seconds, %ld images\n", i, loss, avg_loss, sec(clock()-timer), *net.seen);
+      //free_data(train);
+      ////
+      //if((i % 100) == 0) net.learning_rate *= .1;
+      //if(i%100==0){
+      //   char buff[256];
+      //   sprintf(buff, "%s/%s_%d.weights",backup_directory,base, i);
+      //   save_weights(net, buff);
+      //}
+      //....
+  }
+}
+
+
+void dn_ini(){
+   FileNod_ini(&file_dcfg, &master_mem);
+   FileNod_LoadFile(&file_dcfg, PATH_DN_CFG);
+   
+   FileNod_ini(&file_dweight, &master_mem);
+   FileNod_LoadFile(&file_dweight, PATH_DN_WEIGHT);
+   info_print("FILE: %s", file_dcfg.file.content.data);
+   
+   view_t datanet_cfg = file_dcfg.file.content;
+   view_t datanet_weight = file_dweight.file.content;
+ 
+   //TODO Do some IA learning stuff..
+   //net= *parse_network_cfg(PATH_DN_CFG);
+   //if(datanet_weight.size){
+   //   load_weights(&net, file_dweight.file.used_path);
+   //}
+
+   select_train_folder();
+}
+
+void dn_run(){
+   dn_train();
+   
+   static double time = 0;time++;
+   FileNod_IsModified_CheckForReload(&file_dcfg, time,20);
+}
+
+///--------------------------------------------------------------------------------------------
+///==|MAIN|==
+///============================================================================================
+
+int JIT_MAIN(jit_t* _args){      
+   args = _args;
+   
+   static bool one =false;
+   if(!one){one=true;
+      initialize();
+      dn_ini();
+   }
+
+   igText("DbgPoint [%f,%f]",  dbg_x, dbg_y);
+   igText("Size: (%d,%d)",file_img.dim.w,file_img.dim.h) ;
+
+   editor();
+   
+   create_canvas();
+   drawSquare_(&gctx, (vec3){} , "(0,0)");
+   
+   show_img( (uint32_t*)file_img.datatype, file_img.dim.w, file_img.dim.h, (vec3){}, 5);
+
+   subwindow_Files();
+   return 0;
+}

@@ -1,0 +1,80 @@
+@block quaternion
+///////////////////////////////
+#define PI 3.141592653589793238462643383279502884
+#define PI_2 1.570796326794896619231321691639751442098584699687552910487
+#define R90 PI_2
+#define PI_4 0.785398163397448309615660845819875721049292349843776455
+
+#define gl_VertexID gl_VertexIndex
+#define gl_InstanceID gl_InstanceIndex
+//////////////////////
+///== Quaternion ==///
+vec4 q_new(){
+   return vec4(0,0,0,1);
+}
+vec4 q_roll(vec4 _, float _angle)
+{
+   float _rw = cos(0.5 * _angle);
+   float _rz = sin(0.5 * _angle);
+
+   float _tx = (_.x * _rw)  - (_.y * _rz);
+   float _tz = (_.z * _rw)  + (_.w * _rz);
+
+   return vec4(
+     _tx,
+     (_.y * _rw)  + (_.x * _rz),
+     _tz,
+     (_.w * _rw)  - (_.z * _rz)
+   );
+}
+vec4 q_yaw(vec4 _, float _angle)
+{
+   float _rw =  cos(0.5 * _angle) ;
+   float _ry =  sin(0.5 * _angle);
+
+   float _tx = (_.x * _rw) + (_.z * _ry);
+   float _ty = (_.y * _rw) + (_.w * _ry);
+
+   return vec4(
+      _tx,
+      _ty,
+      (_.z * _rw) - (_.x * _ry),
+      (_.w * _rw) - (_.y * _ry)
+   );
+}
+vec4 q_pitch(vec4 _, float _angle)
+{
+   float _rw =  cos(0.5 * _angle);
+   float _rx =  sin(0.5 * _angle);
+
+   float _tx  = (_.x * _rw) + (_.w * _rx);
+   float _ty  = (_.y * _rw) - (_.z * _rx);
+
+   return vec4(
+      _tx,
+      _ty,
+      (_.z * _rw) + (_.y * _rx),
+      (_.w * _rw) - (_.x * _rx)
+   );
+}
+vec3 rotate(vec3 _, vec4 _q)
+{
+   float _tx  = _.x;
+   float _ty  = _.y;
+   float _tz =  _.z;
+
+   _=cross(_,vec3(_q.x,_q.y,_q.z));
+
+   _.x -= _tx * _q.w;
+   _.y -= _ty * _q.w;
+   _.z -= _tz * _q.w;
+
+   _=cross(_,vec3(_q.x,_q.y,_q.z));
+
+   _.x = 2 * _.x + _tx;
+   _.y = 2 * _.y + _ty;
+   _.z = 2 * _.z + _tz;
+
+   return _;
+}
+@end

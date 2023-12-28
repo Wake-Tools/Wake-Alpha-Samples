@@ -1,0 +1,249 @@
+/*|| https://wake.tools ||                                                         || JIT C99 | Wake Alpha ||
+  | --------------------------------------------------------------------------------------------------+-+++|>
+  +-  IA String                                                                                || @ Maeiky ||
+  |---------------------------------------------------------------------------------------------------+-+++|>
+  +-  Use the evolutive algorithm with natural selection a mutation to find the input string
+  |
+  |-----|--------|---------------------|-----------------------------|--------------------------------+-+++|>
+*/
+#include "jit.h"
+#include "imgui_draw.h"
+
+#include <stdlib.h>
+#include <time.h>
+//
+
+static char alphabet[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ,.! ";
+static char* target = "Hello World!";
+
+#define MAX_ENTITY 1024
+#define ENTITY_COUNT 20
+#define GENOME_SIZE 20
+static char target_word[GENOME_SIZE] = {};
+
+
+typedef struct entity_t{
+   int id;
+   int score;
+   int mate_id;
+   char genome[GENOME_SIZE];
+   char child[GENOME_SIZE];
+   float fitness;
+   bool selected;
+}entity_t;
+
+ARRAY_fixed(Entity, entity_t, MAX_ENTITY);
+Entity aEntity={};
+Entity aChild={};
+
+ARRAY_fixed(EntityID, int, MAX_ENTITY);
+
+static int rand_range(int min_n, int max_n){
+    return rand() % (max_n - min_n + 1) + min_n;
+}
+
+static void random_genome(char* _genome, int size){
+   for(int i=0; i<size;i++){
+      _genome[i]= alphabet[rand_range(0,sizeof(alphabet)-2)];
+   }
+   _genome[GENOME_SIZE-1]=0;
+}
+static void mix_genome(char* _child, char* _parent_first, char* _parent_second){
+   for(int i=0; i<GENOME_SIZE;i++){
+      if(rand()%2==0){
+         _child[i]= _parent_first[i];
+      }else{
+         _child[i]= _parent_second[i];
+      }  
+   }
+}
+
+entity_t new_entity(int _id){
+   entity_t e =(entity_t) {.fitness=0, .id=_id+1};//skip id:0
+   random_genome((char*)&e.genome, GENOME_SIZE);
+   return e;
+}
+entity_t new_child(int _id, char* genome){
+   entity_t e =(entity_t) {.fitness=0, .id=_id+1};//skip id:0
+   memcpy(e.genome, genome, GENOME_SIZE);
+   return e;
+}
+
+static float similarity_score(char* _genome1, char* _genome2){
+   return 0;
+}
+
+static void spawn_population(int _count){
+   for(int i=0;i<_count;i++){
+       Entity_add(&aEntity, new_entity(aEntity.size));
+   }
+}
+static void spawn_childen(int _count){
+   for(int i=0;i<aEntity.size;i++){
+      if(aEntity.data[i].mate_id){
+         Entity_add(&aChild, new_child(i, (char*)&aEntity.data[i].child));
+      }
+   }
+   Entity_reset(&aEntity);
+   for(int i=0;i<aChild.size;i++){
+       Entity_add(&aEntity, aChild.data[i]);
+   }
+   Entity_reset(&aChild);
+}
+
+static int entity_get_score(entity_t* _e ){
+   int score = 0;
+   for(int i=0;i<GENOME_SIZE;i++){
+      if(_e->genome[i] == target_word[i] && target_word[i]!=0){
+         score++;
+      }
+   }
+   _e->score = score;
+   return score;
+}
+
+static void entity_mate(entity_t* _first, entity_t* _second){
+   mix_genome((char*)&_first->child, (char*)&_first->genome, (char*)&_second->genome);
+}
+
+static int Population = 30;
+enum MyItemColumnID
+{
+    MyItemColumnID_ID,
+    MyItemColumnID_Name,
+    MyItemColumnID_Action,
+    MyItemColumnID_Quantity,
+    MyItemColumnID_Description
+};
+
+static void population_tbl(){
+ float TEXT_BASE_HEIGHT = igGetTextLineHeightWithSpacing();
+    
+ static ImGuiTableFlags flags =
+      ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable | ImGuiTableFlags_Hideable | ImGuiTableFlags_Sortable | ImGuiTableFlags_SortMulti
+      | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV | ImGuiTableFlags_NoBordersInBody
+      | ImGuiTableFlags_ScrollY;
+      
+    int col_count = 6;
+    if (
+      igBeginTable("table_sorting", col_count, flags, (ImVec2){0.0f, TEXT_BASE_HEIGHT * (aEntity.size+1)}, 0.0f)){
+      igTableSetupColumn("ID",       ImGuiTableColumnFlags_DefaultSort|ImGuiTableColumnFlags_WidthFixed,   0.0f, MyItemColumnID_ID);
+      igTableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed,   0.0f, MyItemColumnID_Name);
+      igTableSetupColumn("Score", ImGuiTableColumnFlags_WidthFixed,   0.0f, MyItemColumnID_Name);
+      igTableSetupColumn("MateID", ImGuiTableColumnFlags_WidthFixed,   0.0f, MyItemColumnID_Name);
+      igTableSetupColumn("Child", ImGuiTableColumnFlags_WidthFixed,   0.0f, MyItemColumnID_Name);
+      igTableSetupColumn("Selected", ImGuiTableColumnFlags_WidthFixed,   0.0f, MyItemColumnID_Name);
+
+      igTableHeadersRow();
+
+      // SELECT BEST ENTITY //
+      int sel_count=0;
+      for(int i=0;i<aEntity.size; i++){
+         int score =  entity_get_score(&aEntity.data[i]);
+         if(score>=1){
+            aEntity.data[i].selected=true;
+            sel_count++;
+         }else{
+             aEntity.data[i].selected=false;
+             aEntity.data[i].mate_id=0;
+             aEntity.data[i].child[0]=0;
+         }
+      }
+      
+      for(int i=0;i<aEntity.size; i++){
+         int aSel[MAX_ENTITY]; int sz=0;
+         for(int j=0;j<aEntity.size; j++){
+            if(aEntity.data[j].score >=aEntity.data[i].score){
+               aSel[sz]=aEntity.data[j].id;sz++;
+            }
+         }
+         aEntity.data[i].mate_id = aSel[rand_range(0, sz-1)];
+      }
+      
+       // MATE ENTITY //
+      for(int i=0;i<aEntity.size; i++){
+        entity_t* e = &aEntity.data[i];
+        entity_mate(e,&aEntity.data[e->mate_id-1]);
+      }
+
+      // SHOW DATA //
+      for(int i=0;i<aEntity.size; i++){
+         igPushID_Int( aEntity.data[i].id );
+            igTableNextRow(0,0);
+            igTableNextColumn();
+            igText("%03d", aEntity.data[i].id);
+            igTableNextColumn();
+            igTextUnformatted(aEntity.data[i].genome,0);
+            igTableNextColumn();
+
+            igText("%d",aEntity.data[i].score);
+               igTableNextColumn();
+            igText("%03d",aEntity.data[i].mate_id);
+               igTableNextColumn();
+            igTextUnformatted(aEntity.data[i].child,0);
+               igTableNextColumn();
+            if(aEntity.data[i].selected){
+               igTextUnformatted("y",0);
+               for(int c=0;c<col_count;c++){igTableSetBgColor(ImGuiTableBgTarget_CellBg, IM_COL32(0,200,0,100), c);}
+           }else{
+               igTextUnformatted("n",0);
+            }
+            
+         igPopID();
+      }
+       
+    igEndTable();}
+}
+
+static int Generation = 0;
+jit_t* args;
+int JIT_MAIN(jit_t* _args){
+   args = _args;
+
+   static bool ini =false;
+   if(!ini){ini=true;
+      time_t t; srand((unsigned)time(&t));
+      //igText("-------- IA learn ----------");
+      spawn_population(ENTITY_COUNT);
+   }
+   
+   if(igInputTextWithHint("##InpNew", "Target word..", target_word, GENOME_SIZE, ImGuiInputTextFlags_EnterReturnsTrue,0,0)){       
+   }
+   igSameLine(0,-1);
+   igPushStyleColor_Vec4(ImGuiCol_Button, (ImVec4){0,1,1,0.4});   
+   if(igButton("Spawn", (ImVec2){50,20})) {
+      spawn_population(ENTITY_COUNT);
+   }
+   igSameLine(0,-1);
+   if(igButton("Evolve", (ImVec2){100,20})) {
+      Generation++;
+      spawn_childen(ENTITY_COUNT);
+   }
+   igPopStyleColor(1);
+   igSameLine(0,-1);
+   igText("Gen %d",Generation);
+   
+   static bool run = false;
+   igCheckbox("Run Simulation",  &run);
+            
+   if(run){
+      spawn_childen(ENTITY_COUNT);
+      spawn_population(ENTITY_COUNT);
+   }
+   
+   if (
+   igBeginTabBar("##TabBar",0)){
+      
+      static bool show_pop=true;if (
+      igBeginTabItem("Population",&show_pop,0)){
+         population_tbl();
+      igEndTabItem();}
+      
+      static bool show_child=true;if (
+      igBeginTabItem("Child",&show_child,0)){
+         igText("Gradients");
+         
+      igEndTabItem();}
+   igEndTabBar();}
+   return 0;
+ }

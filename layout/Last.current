@@ -1,0 +1,145 @@
+{
+"layout": {
+  "ini_settings": "[Window][MainWindowHost]
+Pos=0,0
+Size=1088,883
+Collapsed=0
+
+[Window][Debug##Default]
+Pos=60,60
+Size=400,400
+Collapsed=0
+
+[Window][rchip]
+Pos=0,19
+Size=261,302
+Collapsed=0
+
+[Window][eye]
+Pos=0,625
+Size=261,258
+Collapsed=0
+
+[Window][psphere]
+Pos=0,19
+Size=261,864
+Collapsed=0
+
+[Window][space]
+Pos=0,19
+Size=1088,864
+Collapsed=0
+
+[Window][ribbon]
+Pos=263,581
+Size=554,302
+Collapsed=0
+
+[Window][IA_string]
+Pos=819,454
+Size=269,429
+Collapsed=0
+
+[Window][image_load]
+Pos=819,19
+Size=135,433
+Collapsed=0
+
+[Window][Files]
+Pos=819,19
+Size=269,864
+Collapsed=0
+
+[Window][Style Editor]
+Pos=60,60
+Size=339,902
+Collapsed=0
+
+[Window][Dear ImGui Demo]
+Pos=284,339
+Size=550,680
+Collapsed=0
+
+[Window][JSON Demo]
+ViewportPos=0,0
+ViewportId=0x67F88718
+Size=550,680
+Collapsed=0
+
+[Window][Frame Capture]
+ViewportPos=-826,362
+ViewportId=0x24CB0605
+Size=440,400
+Collapsed=0
+
+[Window][Buffers]
+ViewportPos=-826,362
+ViewportId=0x24CB0605
+Size=440,212
+Collapsed=0
+
+[Window][Capabilities]
+ViewportPos=-826,362
+ViewportId=0x24CB0605
+Size=440,212
+Collapsed=0
+
+[Window][Passes]
+ViewportPos=-826,362
+ViewportId=0x24CB0605
+Size=220,400
+Collapsed=0
+
+[Window][HelloWorld]
+Pos=598,19
+Size=490,433
+Collapsed=0
+
+[Table][0x8D315E65,6]
+RefScale=13
+Column 0  Width=26 Sort=0v
+Column 1  Width=133
+Column 2  Width=47
+Column 3  Width=54
+Column 4  Width=133
+Column 5  Width=68
+
+[Table][0x04858A11,3]
+RefScale=13
+Column 0  Width=26 Sort=0v
+Column 1  Width=40
+Column 2  Width=40
+
+[Docking][Data]
+DockSpace ID=0x7FF8B20B Window=0xAE55842F Pos=-1484,37 Size=1088,864 CentralNode=1
+
+",
+  "module": {
+    "HelloWorld": {
+      "open": false
+},
+    "IA_string": {
+      "open": false
+},
+    "eye": {
+      "open": false
+},
+    "image_load": {
+      "open": false
+},
+    "psphere": {
+      "open": false
+},
+    "rchip": {
+      "open": false
+},
+    "ribbon": {
+      "open": false
+},
+    "space": {
+      "open": false
+}
+}
+}
+
+}

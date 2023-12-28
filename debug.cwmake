@@ -1,0 +1,4 @@
+-{_wToolchain}= VLianceTool/LibRT[x64]
+>
+:wake samples.env
+>
