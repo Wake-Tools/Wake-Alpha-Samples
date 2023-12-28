@@ -225,7 +225,7 @@ void main() {
 	fragColor = mix(freqs[3]-.3, 1., v) * vec4(1.5*freqs[2] * t * t* t , 1.2*freqs[1] * t * t, freqs[3]*t, 1.0)+c2+starcolor;
 
    float gray = (fragColor.r+fragColor.g+fragColor.b)/3.0;
-   fragColor.a =min(gray*10.0,1.0)
+   fragColor.a =min(gray*10.0,1.0);
 }
 
 @end
