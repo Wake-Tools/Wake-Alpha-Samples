@@ -1,2 +1,4 @@
 .wdat/
 *.glsl.h
+config.json
+*.current
